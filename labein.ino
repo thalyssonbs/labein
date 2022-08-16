@@ -15,7 +15,7 @@ const char * myWriteAPIKey = "0SI57X1WA9TRN8QD";
 
 
 #define WIFI_SSID         "Thalysson" //Não vai mais precisar
-#define WIFI_PASS         "hjpj64y8"
+#define WIFI_PASS         "hjpj64y8" //Também não precisa
 #define APP_KEY           "53a899e4-8918-44dc-b228-6482008e0228"      // Should look like "de0bxxxx-1x3x-4x3x-ax2x-5dabxxxxxxxx"
 #define APP_SECRET        "87b78883-a4ec-4a09-8b99-154aaee1f32b-2afcc2d3-0506-4726-b16e-6d1b46bffea6"   // Should look like "5f36xxxx-x3x7-4x3x-xexe-e86724a9xxxx-4c4axxxx-3x3x-x5xe-x9x3-333d65xxxxxx"
 #define TEMP_SENSOR_ID    "62b372d50aec232058ee3189"    // Should look like "5dc1564130xxxxxxxxxxxxxx"

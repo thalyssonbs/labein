@@ -120,12 +120,7 @@ void analiseReles(bool onLine) {
       rele(DEVICE_ID, false);
     }
   }
-//  if(!internetOn) {
-//    if(globalToggleStates["toggleAquecedor"] == false || globalToggleStates["toggleUmidificador"] == false) {
-//      rele(UMIDIF_ID, false);
-//      rele(DEVICE_ID, false);
-//    }
-//  }
+
   
   if (globalToggleStates["toggleAquecedor"] == true & failSensor == false){
     if (releStatus[DEVICE_ID] == false){

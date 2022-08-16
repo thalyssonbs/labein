@@ -164,13 +164,7 @@ void analiseReles(bool onLine) {
       }
     } 
   }
-//  if (globalToggleStates["toggleAquecedor"] == false & releStatus[DEVICE_ID] == true) {
-//    rele(DEVICE_ID, false);
-//  }
-//
-//  if (globalToggleStates["toggleUmidificador"] == false & releStatus[UMIDIF_ID] == true) {
-//    rele(UMIDIF_ID, false);
-//  }
+
   
   if(failSensor == true) {
     rele(UMIDIF_ID, false);

@@ -46,14 +46,14 @@ std::map<String, int> globalRangeValues;
 // ModeController
 std::map<String, String> globalModes;
 
+// RelayStatus
 std::map<String, bool> releStatus;
 
 bool globalPowerState;
-unsigned int tempo, tVarr;
+unsigned int tempo;
 
 bool rele1, rele2, tog1, tog2, failSensor;
 int tem, umi;
-
 
 
 void rele(const String& idDev, bool stats) {
@@ -67,8 +67,6 @@ void rele(const String& idDev, bool stats) {
     releStatus[UMIDIF_ID] = stats;
     EEPROM.write(2, stats);
     EEPROM.commit();
-    
-
   }
 
   if (idDev == DEVICE_ID) {
@@ -79,14 +77,12 @@ void rele(const String& idDev, bool stats) {
       digitalWrite(3, LOW);
     }
     releStatus[DEVICE_ID] = stats;
-    
     EEPROM.write(1, stats);
     EEPROM.commit();
   }
 }
 
 void analiseReles(bool onLine) {
-
   if(!onLine) {
     sensors_event_t event;
     dht.temperature().getEvent(&event);
@@ -147,7 +143,6 @@ void analiseReles(bool onLine) {
       }
     } 
   }
-
   
   if(failSensor == true) {
     rele(UMIDIF_ID, false);
@@ -159,7 +154,6 @@ void analiseReles(bool onLine) {
 
 // ToggleController
 bool onToggleState(const String& deviceId, const String& instance, bool state) {
-  //Serial.printf("[Device: %s]: State for \"%s\" set to %s\r\n", deviceId.c_str(), instance.c_str(), state ? "on" : "off");
   globalToggleStates[instance] = state;
   if (instance == "toggleAquecedor"){
     EEPROM.write(3, state);
@@ -211,7 +205,6 @@ void updateRangeValue(String instance, int value) {
 }
 
 bool onPowerState(const String &deviceId, bool &state) {
-
   rele(deviceId, state);
   globalPowerState = state;
   releStatus[deviceId] = state; 
@@ -254,7 +247,6 @@ void updatePowerState(bool state) {
 
 void handleTemperaturesensor() {
   if (deviceIsOn == false) return;
-
   unsigned long actualMillis = millis();
   if (actualMillis - lastEvent < EVENT_WAIT_TIME) return;
   sensors_event_t event;
@@ -273,26 +265,19 @@ void handleTemperaturesensor() {
 
   temperature += tempOffset;
   humidity += umiOffset;
-
   if (temperature == lastTemperature & humidity == lastHumidity) return; // if no values changed do nothing...
   lastTemperature = temperature;  // save actual temperature for next compare
   lastHumidity = humidity;        // save actual humidity for next compare
   lastEvent = actualMillis;       // save actual time for next compare
   SinricProTemperaturesensor &mySensor = SinricPro[TEMP_SENSOR_ID];  // get temperaturesensor device
   bool success = mySensor.sendTemperatureEvent(temperature, humidity); // send event
-  if (success) {  // if event was sent successfuly, print temperature and humidity to serial
+  if (success) {
     atualizaThingSpeak();
-    //Serial.printf("Temperature: %2.1f Celsius\tHumidity: %2.1f%%\r\n", temperature, humidity);
-  } else {  // if sending event failed, print error message
-    //Serial.printf("Something went wrong...could not send Event to server!\r\n");
   }
-
-
 }
 
 
 void setupWiFi() {
-
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
 
@@ -311,31 +296,16 @@ void setupWiFi() {
 // setup function for SinricPro
 void setupSinricPro() {
 
-  // PowerStateController
   umidificador.onPowerState(onPowerState);
-
-  // PowerStateController
   aquecedor.onPowerState(onPowerState);
-
-  // ModeController
   aquecedor.onSetMode("modeAquecedor", onSetMode);
-
   umidificador.onSetMode("modeUmidificador", onSetMode);
-
-  // RangeController
   umidificador.onRangeValue("rangeUmidificador", onRangeValue);
   umidificador.onAdjustRangeValue("rangeUmidificador", onAdjustRangeValue);
-
-
-  // ToggleController
   aquecedor.onToggleState("toggleAquecedor", onToggleState);
   umidificador.onToggleState("toggleUmidificador", onToggleState);
-
-  // RangeController
   aquecedor.onRangeValue("rangeAquecedor", onRangeValue);
   aquecedor.onAdjustRangeValue("rangeAquecedor", onAdjustRangeValue);
-
-  // add device to SinricPro
   SinricProTemperaturesensor &mySensor = SinricPro[TEMP_SENSOR_ID];
   mySensor.onPowerState(onPowerState);
 
@@ -443,7 +413,6 @@ void semCon() {
 
 
 void atualizaThingSpeak(){
-
   ThingSpeak.setField(1, temperature);
   ThingSpeak.setField(2, humidity);
   ThingSpeak.setField(3, releStatus[DEVICE_ID]);

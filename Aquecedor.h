@@ -1,6 +1,6 @@
 #ifndef _AQUECEDOR_H_
 #define _AQUECEDOR_H_
-//library
+
 #include <SinricProDevice.h>
 #include <Capabilities/RangeController.h>
 #include <Capabilities/ModeController.h>

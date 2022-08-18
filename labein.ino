@@ -9,6 +9,7 @@ const uint32_t connectTimeoutMs = 10000;
 #include "SinricProTemperaturesensor.h"
 #include "DHT.h"
 #include "ThingSpeak.h"
+#include "Secrets.h"
 
 unsigned long myChannelNumber = 1826839;
 const char * myWriteAPIKey = "0SI57X1WA9TRN8QD";

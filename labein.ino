@@ -1,8 +1,6 @@
 #include <EEPROM.h>
 #include <Arduino.h>
 #include <ESP8266WiFiMulti.h> 
-ESP8266WiFiMulti wifiMulti;
-const uint32_t connectTimeoutMs = 10000;
 #include "SinricPro.h"
 #include "Aquecedor.h"
 #include "Umidificador.h"
@@ -11,23 +9,20 @@ const uint32_t connectTimeoutMs = 10000;
 #include "ThingSpeak.h"
 #include "Secrets.h"
 
-
-
-
 #define BAUD_RATE         9600  // Not using serial!
 #define EVENT_WAIT_TIME   30000              
 
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
-
 #define DHTPIN 2    
 #define DHTTYPE    DHT22
-
 DHT_Unified dht(DHTPIN, DHTTYPE);    
 
+ESP8266WiFiMulti wifiMulti;
 WebSocketsClient webSocket;
 WiFiClient  client;
+const uint32_t connectTimeoutMs = 10000;
 
 Aquecedor &aquecedor = SinricPro[DEVICE_ID];
 Umidificador &umidificador = SinricPro[UMIDIF_ID];
@@ -194,8 +189,6 @@ bool onRangeValue(const String &deviceId, const String& instance, int &rangeValu
     EEPROM.write(6, rangeValue);
     EEPROM.commit();
   }
-
-  
   return true;
 }
 
@@ -210,9 +203,6 @@ bool onSetMode(const String& deviceId, const String& instance, String &mode) {
   globalModes[instance] = mode;
   return true;
 }
-
-
-
 
 // RangeController
 void updateRangeValue(String instance, int value) {
@@ -240,7 +230,6 @@ void updateToggleState(String instance, bool state) {
     EEPROM.write(4, state);
     EEPROM.commit();
   }
-  
 }
 
 void sendPushNotification(String instance, String notification) {
@@ -293,10 +282,8 @@ void handleTemperaturesensor() {
   bool success = mySensor.sendTemperatureEvent(temperature, humidity); // send event
   if (success) {  // if event was sent successfuly, print temperature and humidity to serial
     atualizaThingSpeak();
-    //internetOn = true;
     //Serial.printf("Temperature: %2.1f Celsius\tHumidity: %2.1f%%\r\n", temperature, humidity);
   } else {  // if sending event failed, print error message
-    //internetOn = false;
     //Serial.printf("Something went wrong...could not send Event to server!\r\n");
   }
 
@@ -359,7 +346,6 @@ void setupSinricPro() {
   SinricPro.begin(APP_KEY, APP_SECRET);  
 }
 
-// main setup function
 void setup() {
   pinMode(0, OUTPUT);
   pinMode(3, OUTPUT);
@@ -381,8 +367,6 @@ void setup() {
   rele(DEVICE_ID, rele1);
   rele(UMIDIF_ID, rele2);
   delay(1000);
-
-  
 
   globalToggleStates["toggleAquecedor"] = tog1;
   delay(1000);
@@ -421,17 +405,11 @@ void setup() {
     umidificador.sendToggleStateEvent("toggleUmidificador", tog2);
     ThingSpeak.begin(client);
   }
-
   tempo = millis();
-  tVarr = millis();
 }
 
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
-//    delay(1000);
-//    analiseReles();
-//    delay(1000);
-//    piscaRele();
     semCon();
   }
   else {
@@ -448,22 +426,10 @@ void loop() {
         sendPushNotification("aquecedor", "Temperatura fora do intervalo! " + String(temperature) + " C");
       }
       tempo = millis();
-    
     }
   }
-  
 }
 
-void piscaRele(){
-  while(WiFi.status() != WL_CONNECTED) {
-    digitalWrite(3, HIGH);
-    delay(1000);
-    digitalWrite(3, LOW);
-    delay(1000);
-  }
-  setupSinricPro();
-  return;
-}
 
 void semCon() {
   while(WiFi.status() != WL_CONNECTED) {
@@ -475,9 +441,6 @@ void semCon() {
   return;
 }
 
-void mudaRele() {
-  rele(DEVICE_ID, releStatus[DEVICE_ID] ? false : true);
-}
 
 void atualizaThingSpeak(){
 

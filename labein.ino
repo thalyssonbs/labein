@@ -308,10 +308,11 @@ void setupWiFi() {
 
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
-  wifiMulti.addAP("Unir", "r1c1unir");
-  wifiMulti.addAP("Thalysson", "hjpj64y8");
-  wifiMulti.addAP("Visitante", "12345678");
-  wifiMulti.addAP("ThalyssoniPhone", "12345678");
+
+  wifiMulti.addAP(ssid1, pass1);
+  wifiMulti.addAP(ssid2, pass2);
+  wifiMulti.addAP(ssid3, pass3);
+  wifiMulti.addAP(ssid4, pass4);
 
   tempo = millis();
   while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED & millis()-tempo < 28000) {

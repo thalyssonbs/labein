@@ -388,7 +388,7 @@ void loop() {
     analiseReles(true);
 
     if(millis()-tempo > 300000) {
-      if (humidity - globalRangeValues["rangeUmidificador"] > 2.5 || humidity - globalRangeValues["rangeUmidificador"] < -2.5) {
+      if (humidity - globalRangeValues["rangeUmidificador"] > 5 || humidity - globalRangeValues["rangeUmidificador"] < -4) {
         sendPushNotification("umidificador", "Umidade fora do intervalo! " + String(humidity) + "%");
     }
       delay(500);

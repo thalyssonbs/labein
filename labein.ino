@@ -8,13 +8,12 @@
 #include "DHT.h"
 #include "ThingSpeak.h"
 #include "Secrets.h"
-
-#define BAUD_RATE         9600  // Not using serial!
-#define EVENT_WAIT_TIME   30000              
-
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
 #include <DHT_U.h>
+
+#define BAUD_RATE         9600  // Not using serial!
+#define EVENT_WAIT_TIME   30000              
 #define DHTPIN 2    
 #define DHTTYPE    DHT22
 DHT_Unified dht(DHTPIN, DHTTYPE);    
@@ -27,34 +26,19 @@ const uint32_t connectTimeoutMs = 10000;
 Aquecedor &aquecedor = SinricPro[DEVICE_ID];
 Umidificador &umidificador = SinricPro[UMIDIF_ID];
 
-bool deviceIsOn = true;                       // Temeprature sensor on/off state
-float temperature;                            // actual temperature
-float humidity;                               // actual humidity
-float lastTemperature;                        // last known temperature (for compare)
-float lastHumidity;                           // last known humidity (for compare)
-unsigned long lastEvent = (-EVENT_WAIT_TIME); // last time event has been sent
-float tempOffset = 0.5;
-float umiOffset = 0;
-bool internetOn;
-
-// ToggleController
-std::map<String, bool> globalToggleStates;
-
-// RangeController
-std::map<String, int> globalRangeValues;
-
-// ModeController
-std::map<String, String> globalModes;
-
-// RelayStatus
-std::map<String, bool> releStatus;
-
-bool globalPowerState;
+bool deviceIsOn = true;
+float temperature, humidity, lastTemperature, lastHumidity;
+unsigned long lastEvent = (-EVENT_WAIT_TIME);
+float tempOffset = 0.5, umiOffset = 0;
+bool globalPowerState, rele1, rele2, tog1, tog2, failSensor;
 unsigned int tempo;
-
-bool rele1, rele2, tog1, tog2, failSensor;
 int tem, umi;
 
+/* Global Status */
+std::map<String, bool> globalToggleStates;
+std::map<String, int> globalRangeValues;
+std::map<String, String> globalModes;
+std::map<String, bool> releStatus;
 
 void rele(const String& idDev, bool stats) {
   if (idDev == UMIDIF_ID) {
@@ -99,10 +83,6 @@ void analiseReles(bool onLine) {
     }
     temperature += tempOffset;
     humidity += umiOffset;
-    // if(globalToggleStates["toggleAquecedor"] == false || globalToggleStates["toggleUmidificador"] == false) {
-    //   rele(UMIDIF_ID, false);
-    //   rele(DEVICE_ID, false);
-    // }
   }
 
   
@@ -151,6 +131,180 @@ void analiseReles(bool onLine) {
 
 }
 
+void setupWiFi() {
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+
+  wifiMulti.addAP(ssid1, pass1);
+  wifiMulti.addAP(ssid2, pass2);
+  wifiMulti.addAP(ssid3, pass3);
+  wifiMulti.addAP(ssid4, pass4);
+
+  tempo = millis();
+  while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED & millis()-tempo < 28000) {
+    delay(250);
+  }
+}
+
+void setup() {
+  pinMode(0, OUTPUT);
+  pinMode(3, OUTPUT);
+  rele(DEVICE_ID, false);
+  rele(UMIDIF_ID, false);
+  dht.begin();
+  
+  EEPROM.begin(6); 
+
+  rele1 = EEPROM.read(1);
+  rele2 = EEPROM.read(2);
+  tog1 = EEPROM.read(3);
+  tog2 = EEPROM.read(4);
+  tem = EEPROM.read(5);
+  umi = EEPROM.read(6);
+
+  setupWiFi();
+
+  rele(DEVICE_ID, rele1);
+  rele(UMIDIF_ID, rele2);
+  delay(1000);
+
+  globalToggleStates["toggleAquecedor"] = tog1;
+  delay(1000);
+  globalToggleStates["toggleUmidificador"] = tog2;
+  delay(1000);
+  globalRangeValues["rangeUmidificador"] = umi;
+  delay(1000);
+  globalRangeValues["rangeAquecedor"] = tem;
+  delay(1000);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    analiseReles(false);
+    setupWiFi();
+    delay(2000);
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    setupSinricPro();
+    delay(1000);
+    aquecedor.sendRangeValueEvent("rangeAquecedor", tem);
+    delay(1000);
+    umidificador.sendRangeValueEvent("rangeUmidificador", umi);
+    delay(1000);
+    aquecedor.sendPowerStateEvent(rele1);
+    delay(1000);
+    umidificador.sendPowerStateEvent(rele2);
+    delay(1000);
+    updateToggleState("toggleAquecedor", tog1);
+    delay(1000);
+    updateToggleState("toggleUmidificador", tog2);
+    delay(1000);
+    aquecedor.sendToggleStateEvent("toggleAquecedor", tog1);
+    delay(1000);
+    umidificador.sendToggleStateEvent("toggleUmidificador", tog2);
+    ThingSpeak.begin(client);
+  }
+  tempo = millis();
+}
+
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) {
+    semCon();
+  }
+  else {
+    SinricPro.handle();
+    handleTemperaturesensor();
+    analiseReles(true);
+    autoOff(true);
+
+    if(millis()-tempo > 300000) {
+      if (humidity - globalRangeValues["rangeUmidificador"] > 5 || humidity - globalRangeValues["rangeUmidificador"] < -4) {
+        sendPushNotification("umidificador", "Umidade fora do intervalo! " + String(humidity) + "%");
+    }
+      delay(500);
+      if (temperature - globalRangeValues["rangeAquecedor"] < -2 || temperature - globalRangeValues["rangeAquecedor"] > 2) {
+        sendPushNotification("aquecedor", "Temperatura fora do intervalo! " + String(temperature) + " C");
+      }
+      tempo = millis();
+    }
+  }
+}
+
+void semCon() {
+  while(WiFi.status() != WL_CONNECTED) {
+    analiseReles(false);
+    autoOff(false);
+    setupWiFi();
+    delay(2000);
+  }
+  setupSinricPro();
+  return;
+}
+
+void atualizaThingSpeak(){
+  ThingSpeak.setField(1, temperature);
+  ThingSpeak.setField(2, humidity);
+  ThingSpeak.setField(3, releStatus[DEVICE_ID]);
+  ThingSpeak.setField(4, releStatus[UMIDIF_ID]);
+
+  int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
+}
+
+void autoOff(bool onLine){
+  unsigned int autoOffAq, autoOffUm;
+  bool contandoAq, contandoUm;
+  if(globalToggleStates["toggleAquecedor"] == false & releStatus[DEVICE_ID] == true) {
+    if(!contandoAq){
+      autoOffAq = millis();
+      contandoAq = true;
+    }
+    else{
+      if(millis()-autoOffAq > 300000){
+        rele(DEVICE_ID, false);
+        contandoAq = false;
+        if(onLine) {
+          aquecedor.sendPowerStateEvent(false);
+        }
+      }
+    }
+  }
+  if(globalToggleStates["toggleUmidificador"] == false & releStatus[UMIDIF_ID] == true) {
+    if(!contandoUm) {
+      autoOffUm = millis();
+      contandoUm = true;
+    }
+    else{
+      if(millis()-autoOffUm > 300000){
+        rele(UMIDIF_ID, false);
+        contandoUm = false;
+        if(onLine){
+          umidificador.sendPowerStateEvent(false);
+        }
+      }
+    }
+  }
+}
+
+void setupSinricPro() {
+
+  umidificador.onPowerState(onPowerState);
+  aquecedor.onPowerState(onPowerState);
+  aquecedor.onSetMode("modeAquecedor", onSetMode);
+  umidificador.onSetMode("modeUmidificador", onSetMode);
+  umidificador.onRangeValue("rangeUmidificador", onRangeValue);
+  umidificador.onAdjustRangeValue("rangeUmidificador", onAdjustRangeValue);
+  aquecedor.onToggleState("toggleAquecedor", onToggleState);
+  umidificador.onToggleState("toggleUmidificador", onToggleState);
+  aquecedor.onRangeValue("rangeAquecedor", onRangeValue);
+  aquecedor.onAdjustRangeValue("rangeAquecedor", onAdjustRangeValue);
+  SinricProTemperaturesensor &mySensor = SinricPro[TEMP_SENSOR_ID];
+  mySensor.onPowerState(onPowerState);
+
+  // setup SinricPro
+  SinricPro.onConnected([](){}); 
+  SinricPro.onDisconnected([](){});
+  SinricPro.restoreDeviceStates(true); // Uncomment to restore the last known state from the server.
+  SinricPro.begin(APP_KEY, APP_SECRET);  
+}
 
 // ToggleController
 bool onToggleState(const String& deviceId, const String& instance, bool state) {
@@ -273,193 +427,5 @@ void handleTemperaturesensor() {
   bool success = mySensor.sendTemperatureEvent(temperature, humidity); // send event
   if (success) {
     atualizaThingSpeak();
-  }
-}
-
-
-void setupWiFi() {
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-
-  wifiMulti.addAP(ssid1, pass1);
-  wifiMulti.addAP(ssid2, pass2);
-  wifiMulti.addAP(ssid3, pass3);
-  wifiMulti.addAP(ssid4, pass4);
-
-  tempo = millis();
-  while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED & millis()-tempo < 28000) {
-    //Serial.printf(".");
-    delay(250);
-  }
-}
-
-// setup function for SinricPro
-void setupSinricPro() {
-
-  umidificador.onPowerState(onPowerState);
-  aquecedor.onPowerState(onPowerState);
-  aquecedor.onSetMode("modeAquecedor", onSetMode);
-  umidificador.onSetMode("modeUmidificador", onSetMode);
-  umidificador.onRangeValue("rangeUmidificador", onRangeValue);
-  umidificador.onAdjustRangeValue("rangeUmidificador", onAdjustRangeValue);
-  aquecedor.onToggleState("toggleAquecedor", onToggleState);
-  umidificador.onToggleState("toggleUmidificador", onToggleState);
-  aquecedor.onRangeValue("rangeAquecedor", onRangeValue);
-  aquecedor.onAdjustRangeValue("rangeAquecedor", onAdjustRangeValue);
-  SinricProTemperaturesensor &mySensor = SinricPro[TEMP_SENSOR_ID];
-  mySensor.onPowerState(onPowerState);
-
-  // setup SinricPro
-  SinricPro.onConnected([](){}); 
-  SinricPro.onDisconnected([](){});
-  SinricPro.restoreDeviceStates(true); // Uncomment to restore the last known state from the server.
-  SinricPro.begin(APP_KEY, APP_SECRET);  
-}
-
-void setup() {
-  pinMode(0, OUTPUT);
-  pinMode(3, OUTPUT);
-  rele(DEVICE_ID, false);
-  rele(UMIDIF_ID, false);
-  dht.begin();
-  
-  EEPROM.begin(6); 
-
-  rele1 = EEPROM.read(1);
-  rele2 = EEPROM.read(2);
-  tog1 = EEPROM.read(3);
-  tog2 = EEPROM.read(4);
-  tem = EEPROM.read(5);
-  umi = EEPROM.read(6);
-
-  setupWiFi();
-
-  rele(DEVICE_ID, rele1);
-  rele(UMIDIF_ID, rele2);
-  delay(1000);
-
-  globalToggleStates["toggleAquecedor"] = tog1;
-  delay(1000);
-  globalToggleStates["toggleUmidificador"] = tog2;
-  delay(1000);
-  globalRangeValues["rangeUmidificador"] = umi;
-  delay(1000);
-  globalRangeValues["rangeAquecedor"] = tem;
-  delay(1000);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    internetOn = false;
-    analiseReles(false);
-    setupWiFi();
-    delay(2000);
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    internetOn = true;
-    setupSinricPro();
-    delay(1000);
-    aquecedor.sendRangeValueEvent("rangeAquecedor", tem);
-    delay(1000);
-    umidificador.sendRangeValueEvent("rangeUmidificador", umi);
-    delay(1000);
-    aquecedor.sendPowerStateEvent(rele1);
-    delay(1000);
-    umidificador.sendPowerStateEvent(rele2);
-    delay(1000);
-    updateToggleState("toggleAquecedor", tog1);
-    delay(1000);
-    updateToggleState("toggleUmidificador", tog2);
-    delay(1000);
-    aquecedor.sendToggleStateEvent("toggleAquecedor", tog1);
-    delay(1000);
-    umidificador.sendToggleStateEvent("toggleUmidificador", tog2);
-    ThingSpeak.begin(client);
-  }
-  tempo = millis();
-}
-
-void loop() {
-  if (WiFi.status() != WL_CONNECTED) {
-    semCon();
-  }
-  else {
-    SinricPro.handle();
-    handleTemperaturesensor();
-    analiseReles(true);
-    autoOff(true);
-
-    if(millis()-tempo > 300000) {
-      if (humidity - globalRangeValues["rangeUmidificador"] > 5 || humidity - globalRangeValues["rangeUmidificador"] < -4) {
-        sendPushNotification("umidificador", "Umidade fora do intervalo! " + String(humidity) + "%");
-    }
-      delay(500);
-      if (temperature - globalRangeValues["rangeAquecedor"] < -2 || temperature - globalRangeValues["rangeAquecedor"] > 2) {
-        sendPushNotification("aquecedor", "Temperatura fora do intervalo! " + String(temperature) + " C");
-      }
-      tempo = millis();
-    }
-  }
-}
-
-
-void semCon() {
-  while(WiFi.status() != WL_CONNECTED) {
-    analiseReles(false);
-    autoOff(false);
-    setupWiFi();
-    delay(2000);
-  }
-  setupSinricPro();
-  return;
-}
-
-
-void atualizaThingSpeak(){
-  ThingSpeak.setField(1, temperature);
-  ThingSpeak.setField(2, humidity);
-  ThingSpeak.setField(3, releStatus[DEVICE_ID]);
-  ThingSpeak.setField(4, releStatus[UMIDIF_ID]);
-
-  int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
-  if(x != 200) {
-    internetOn = false;
-  }
-  else {
-    internetOn = true;
-  }
-}
-
-void autoOff(bool onLine){
-  unsigned int autoOffAq, autoOffUm;
-  bool contandoAq, contandoUm;
-  if(globalToggleStates["toggleAquecedor"] == false & releStatus[DEVICE_ID] == true) {
-    if(!contandoAq){
-      autoOffAq = millis();
-      contandoAq = true;
-    }
-    else{
-      if(millis()-autoOffAq > 300000){
-        rele(DEVICE_ID, false);
-        contandoAq = false;
-        if(onLine) {
-          aquecedor.sendPowerStateEvent(false);
-        }
-      }
-    }
-  }
-  if(globalToggleStates["toggleUmidificador"] == false & releStatus[UMIDIF_ID] == true) {
-    if(!contandoUm) {
-      autoOffUm = millis();
-      contandoUm = true;
-    }
-    else{
-      if(millis()-autoOffUm > 300000){
-        rele(UMIDIF_ID, false);
-        contandoUm = false;
-        if(onLine){
-          umidificador.sendPowerStateEvent(false);
-        }
-      }
-    }
   }
 }

@@ -99,10 +99,10 @@ void analiseReles(bool onLine) {
     }
     temperature += tempOffset;
     humidity += umiOffset;
-    if(globalToggleStates["toggleAquecedor"] == false || globalToggleStates["toggleUmidificador"] == false) {
-      rele(UMIDIF_ID, false);
-      rele(DEVICE_ID, false);
-    }
+    // if(globalToggleStates["toggleAquecedor"] == false || globalToggleStates["toggleUmidificador"] == false) {
+    //   rele(UMIDIF_ID, false);
+    //   rele(DEVICE_ID, false);
+    // }
   }
 
   
@@ -386,6 +386,7 @@ void loop() {
     SinricPro.handle();
     handleTemperaturesensor();
     analiseReles(true);
+    autoOff(true);
 
     if(millis()-tempo > 300000) {
       if (humidity - globalRangeValues["rangeUmidificador"] > 5 || humidity - globalRangeValues["rangeUmidificador"] < -4) {
@@ -404,6 +405,7 @@ void loop() {
 void semCon() {
   while(WiFi.status() != WL_CONNECTED) {
     analiseReles(false);
+    autoOff(false);
     setupWiFi();
     delay(2000);
   }
@@ -424,5 +426,40 @@ void atualizaThingSpeak(){
   }
   else {
     internetOn = true;
+  }
+}
+
+void autoOff(bool onLine){
+  unsigned int autoOffAq, autoOffUm;
+  bool contandoAq, contandoUm;
+  if(globalToggleStates["toggleAquecedor"] == false & releStatus[DEVICE_ID] == true) {
+    if(!contandoAq){
+      autoOffAq = millis();
+      contandoAq = true;
+    }
+    else{
+      if(millis()-autoOffAq > 300000){
+        rele(DEVICE_ID, false);
+        contandoAq = false;
+        if(onLine) {
+          aquecedor.sendPowerStateEvent(false);
+        }
+      }
+    }
+  }
+  if(globalToggleStates["toggleUmidificador"] == false & releStatus[UMIDIF_ID] == true) {
+    if(!contandoUm) {
+      autoOffUm = millis();
+      contandoUm = true;
+    }
+    else{
+      if(millis()-autoOffUm > 300000){
+        rele(UMIDIF_ID, false);
+        contandoUm = false;
+        if(onLine){
+          umidificador.sendPowerStateEvent(false);
+        }
+      }
+    }
   }
 }

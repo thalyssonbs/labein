@@ -33,6 +33,8 @@ float tempOffset = 0.5, umiOffset = 0;
 bool globalPowerState, rele1, rele2, tog1, tog2, failSensor;
 unsigned int tempo;
 int tem, umi;
+unsigned int autoOffAq, autoOffUm;
+bool contandoAq, contandoUm;
 
 /* Global Status */
 std::map<String, bool> globalToggleStates;
@@ -250,8 +252,7 @@ void atualizaThingSpeak(){
 }
 
 void autoOff(bool onLine){
-  unsigned int autoOffAq, autoOffUm;
-  bool contandoAq, contandoUm;
+
   if(globalToggleStates["toggleAquecedor"] == false & releStatus[DEVICE_ID] == true) {
     if(!contandoAq){
       autoOffAq = millis();

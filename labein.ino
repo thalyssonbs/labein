@@ -32,7 +32,7 @@ unsigned long lastEvent = (-EVENT_WAIT_TIME);
 float tempOffset = 0.5, umiOffset = 0;
 bool globalPowerState, rele1, rele2, tog1, tog2, failSensor;
 unsigned int tempo;
-int tem, umi;
+int tem, umi, umiOut, tempOut;
 unsigned int autoOffAq, autoOffUm;
 bool contandoAq, contandoUm;
 
@@ -218,13 +218,27 @@ void loop() {
     analiseReles(true);
     autoOff(true);
 
-    if(millis()-tempo > 300000) {
+    if(millis()-tempo > 30000) {
       if (humidity - globalRangeValues["rangeUmidificador"] > 5 || humidity - globalRangeValues["rangeUmidificador"] < -4) {
-        sendPushNotification("umidificador", "Umidade fora do intervalo! " + String(humidity) + "%");
+        umiOut ++;
+        if (umiOut >= 10) {
+          sendPushNotification("umidificador", "Umidade fora do intervalo! " + String(humidity) + "%");
+          umiOut = 0;
+        }
+    }
+    else {
+      umiOut = 0;
     }
       delay(500);
       if (temperature - globalRangeValues["rangeAquecedor"] < -2 || temperature - globalRangeValues["rangeAquecedor"] > 2) {
-        sendPushNotification("aquecedor", "Temperatura fora do intervalo! " + String(temperature) + " C");
+        tempOut ++;
+        if (tempOut >= 10) {
+          sendPushNotification("aquecedor", "Temperatura fora do intervalo! " + String(temperature) + " C");
+          tempOut =0;
+        }
+      }
+      else {
+        tempOut = 0;
       }
       tempo = millis();
     }

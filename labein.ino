@@ -12,8 +12,8 @@
 #include <DHT.h>
 #include <DHT_U.h>
 
-#define BAUD_RATE         9600  // Not using serial!
-#define EVENT_WAIT_TIME   30000              
+#define BAUD_RATE         9600  // Not using serial
+#define EVENT_WAIT_TIME   30000  // Time interval between measurements and updates
 #define DHTPIN 2    
 #define DHTTYPE    DHT22
 DHT_Unified dht(DHTPIN, DHTTYPE);    

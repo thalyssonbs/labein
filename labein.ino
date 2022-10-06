@@ -221,7 +221,7 @@ void loop() {
     if(millis()-tempo > 30000) {
       if (humidity - globalRangeValues["rangeUmidificador"] > 5 || humidity - globalRangeValues["rangeUmidificador"] < -4) {
         umiOut ++;
-        if (umiOut >= 30) {
+        if (umiOut >= 60) {
           sendPushNotification("umidificador", "Umidade fora do intervalo! " + String(humidity) + "%");
           umiOut = 0;
         }
@@ -232,7 +232,7 @@ void loop() {
       delay(500);
       if (temperature - globalRangeValues["rangeAquecedor"] < -2 || temperature - globalRangeValues["rangeAquecedor"] > 2) {
         tempOut ++;
-        if (tempOut >= 30) {
+        if (tempOut >= 60) {
           sendPushNotification("aquecedor", "Temperatura fora do intervalo! " + String(temperature) + " C");
           tempOut =0;
         }

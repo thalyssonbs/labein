@@ -30,11 +30,12 @@ bool deviceIsOn = true;
 float temperature, humidity, lastTemperature, lastHumidity;
 unsigned long lastEvent = (-EVENT_WAIT_TIME);
 float tempOffset = 0.5, umiOffset = 0;
-bool globalPowerState, rele1, rele2, tog1, tog2, failSensor;
-unsigned int tempo;
+bool globalPowerState, rele1, rele2, tog1, tog2, failSensor, wifiNotif, relig;
+unsigned int tempo, runing, tsensor;
 int tem, umi, umiOut, tempOut;
 unsigned int autoOffAq, autoOffUm;
 bool contandoAq, contandoUm;
+char buff[32];
 
 /* Global Status */
 std::map<String, bool> globalToggleStates;
@@ -69,6 +70,7 @@ void rele(const String& idDev, bool stats) {
 }
 
 void analiseReles(bool onLine) {
+  ESP.wdtFeed();
   if(!onLine) {
     sensors_event_t event;
     dht.temperature().getEvent(&event);
@@ -125,10 +127,16 @@ void analiseReles(bool onLine) {
       }
     } 
   }
-  
+  tsensor = millis();
   if(failSensor == true) {
     rele(UMIDIF_ID, false);
     rele(DEVICE_ID, false);
+    if (millis()-tsensor < 900000) {
+      sendPushNotification("umidificador", "Falha do sensor DHT!");
+      tsensor = millis();
+      delay(100);
+    }
+    
   }
 
 }
@@ -143,65 +151,137 @@ void setupWiFi() {
   wifiMulti.addAP(ssid4, pass4);
 
   tempo = millis();
-  while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED & millis()-tempo < 28000) {
-    delay(250);
+  while (wifiMulti.run(connectTimeoutMs) != WL_CONNECTED & millis()-tempo < 15000) {
+    delay(1000);
+    ESP.wdtFeed();
   }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    wifiNotif = true;
+  }
+  
 }
 
 void setup() {
+  ESP.wdtDisable();
+  runing = millis();
+  switch (ESP.getResetInfoPtr()->reason) {
+    
+    case REASON_DEFAULT_RST: 
+      // do something at normal startup by power on
+      strcpy_P(buff, PSTR("Power on"));
+      break;
+      
+    case REASON_WDT_RST:
+      // do something at hardware watch dog reset
+      strcpy_P(buff, PSTR("Hardware Watchdog"));     
+      break;
+      
+    case REASON_EXCEPTION_RST:
+      // do something at exception reset
+      strcpy_P(buff, PSTR("Exception"));      
+      break;
+      
+    case REASON_SOFT_WDT_RST:
+      // do something at software watch dog reset
+      strcpy_P(buff, PSTR("Software Watchdog"));
+      break;
+      
+    case REASON_SOFT_RESTART: 
+      // do something at software restart ,system_restart 
+      strcpy_P(buff, PSTR("Software/System restart"));
+      break;
+      
+    case REASON_DEEP_SLEEP_AWAKE:
+      // do something at wake up from deep-sleep
+      strcpy_P(buff, PSTR("Deep-Sleep Wake"));
+      break;
+      
+    case REASON_EXT_SYS_RST:
+      // do something at external system reset (assertion of reset pin)
+      strcpy_P(buff, PSTR("External System"));
+      break;
+      
+    default:  
+      // do something when reset occured for unknown reason
+      strcpy_P(buff, PSTR("Unknown"));     
+      break;
+  }
+
+  /* ----------------------- */
+  
   pinMode(0, OUTPUT);
   pinMode(3, OUTPUT);
+  ESP.wdtFeed();
   rele(DEVICE_ID, false);
   rele(UMIDIF_ID, false);
   dht.begin();
   
   EEPROM.begin(6); 
-
+  ESP.wdtFeed();
   rele1 = EEPROM.read(1);
   rele2 = EEPROM.read(2);
   tog1 = EEPROM.read(3);
   tog2 = EEPROM.read(4);
   tem = EEPROM.read(5);
   umi = EEPROM.read(6);
-
+  
+  ESP.wdtFeed();
   setupWiFi();
+  relig = true;
 
+  ESP.wdtFeed();
   rele(DEVICE_ID, rele1);
+  ESP.wdtFeed();
   rele(UMIDIF_ID, rele2);
   delay(1000);
 
   globalToggleStates["toggleAquecedor"] = tog1;
+  ESP.wdtFeed();
   delay(1000);
   globalToggleStates["toggleUmidificador"] = tog2;
+  ESP.wdtFeed();
   delay(1000);
   globalRangeValues["rangeUmidificador"] = umi;
+  ESP.wdtFeed();
   delay(1000);
   globalRangeValues["rangeAquecedor"] = tem;
+  ESP.wdtFeed();
   delay(1000);
 
   while (WiFi.status() != WL_CONNECTED) {
+    ESP.wdtFeed();
     analiseReles(false);
     setupWiFi();
     delay(2000);
   }
 
   if (WiFi.status() == WL_CONNECTED) {
+    ESP.wdtFeed();
     setupSinricPro();
+    ESP.wdtFeed();
     delay(1000);
     aquecedor.sendRangeValueEvent("rangeAquecedor", tem);
     delay(1000);
+    ESP.wdtFeed();
     umidificador.sendRangeValueEvent("rangeUmidificador", umi);
     delay(1000);
+    ESP.wdtFeed();
     aquecedor.sendPowerStateEvent(rele1);
     delay(1000);
+    ESP.wdtFeed();
     umidificador.sendPowerStateEvent(rele2);
     delay(1000);
+    ESP.wdtFeed();
     updateToggleState("toggleAquecedor", tog1);
     delay(1000);
+    ESP.wdtFeed();
     updateToggleState("toggleUmidificador", tog2);
     delay(1000);
+    ESP.wdtFeed();
     aquecedor.sendToggleStateEvent("toggleAquecedor", tog1);
     delay(1000);
+    ESP.wdtFeed();
     umidificador.sendToggleStateEvent("toggleUmidificador", tog2);
     ThingSpeak.begin(client);
   }
@@ -213,10 +293,21 @@ void loop() {
     semCon();
   }
   else {
+    ESP.wdtFeed();
     SinricPro.handle();
     handleTemperaturesensor();
     analiseReles(true);
     autoOff(true);
+    if (wifiNotif == true & millis()-tempo > 30000) {
+      sendPushNotification("umidificador", "Conectado à rede WiFi " + String(WiFi.SSID()));
+      wifiNotif = false;
+      delay(500);
+      if (relig) {
+        sendPushNotification("aquecedor", "Reiniciado! " + String(buff));
+        relig = false;
+        delay(100);
+      }
+    }
 
     if(millis()-tempo > 30000) {
       if (humidity - globalRangeValues["rangeUmidificador"] > 5 || humidity - globalRangeValues["rangeUmidificador"] < -4) {
@@ -242,6 +333,10 @@ void loop() {
       }
       tempo = millis();
     }
+    ESP.wdtFeed();
+  }
+  if (millis()-runing >= 86400000) {
+    ESP.restart();
   }
 }
 
@@ -250,6 +345,7 @@ void semCon() {
     analiseReles(false);
     autoOff(false);
     setupWiFi();
+    ESP.wdtFeed();
     delay(2000);
   }
   setupSinricPro();
@@ -257,6 +353,7 @@ void semCon() {
 }
 
 void atualizaThingSpeak(){
+  ESP.wdtFeed();
   ThingSpeak.setField(1, temperature);
   ThingSpeak.setField(2, humidity);
   ThingSpeak.setField(3, releStatus[DEVICE_ID]);
@@ -300,19 +397,25 @@ void autoOff(bool onLine){
 }
 
 void setupSinricPro() {
-
+  ESP.wdtFeed();
   umidificador.onPowerState(onPowerState);
   aquecedor.onPowerState(onPowerState);
+  ESP.wdtFeed();
   aquecedor.onSetMode("modeAquecedor", onSetMode);
   umidificador.onSetMode("modeUmidificador", onSetMode);
+  ESP.wdtFeed();
   umidificador.onRangeValue("rangeUmidificador", onRangeValue);
   umidificador.onAdjustRangeValue("rangeUmidificador", onAdjustRangeValue);
+  ESP.wdtFeed();
   aquecedor.onToggleState("toggleAquecedor", onToggleState);
   umidificador.onToggleState("toggleUmidificador", onToggleState);
+  ESP.wdtFeed();
   aquecedor.onRangeValue("rangeAquecedor", onRangeValue);
   aquecedor.onAdjustRangeValue("rangeAquecedor", onAdjustRangeValue);
+  ESP.wdtFeed();
   SinricProTemperaturesensor &mySensor = SinricPro[TEMP_SENSOR_ID];
   mySensor.onPowerState(onPowerState);
+  ESP.wdtFeed();
 
   // setup SinricPro
   SinricPro.onConnected([](){}); 
@@ -323,6 +426,7 @@ void setupSinricPro() {
 
 // ToggleController
 bool onToggleState(const String& deviceId, const String& instance, bool state) {
+  ESP.wdtFeed();
   globalToggleStates[instance] = state;
   if (instance == "toggleAquecedor"){
     EEPROM.write(3, state);
@@ -337,6 +441,7 @@ bool onToggleState(const String& deviceId, const String& instance, bool state) {
 
 // RangeController
 bool onRangeValue(const String &deviceId, const String& instance, int &rangeValue) {
+  ESP.wdtFeed();
   globalRangeValues[instance] = rangeValue;
   if (deviceId == DEVICE_ID) {
     updateToggleState("toggleAquecedor", true);
@@ -356,6 +461,7 @@ bool onRangeValue(const String &deviceId, const String& instance, int &rangeValu
 }
 
 bool onAdjustRangeValue(const String &deviceId, const String& instance, int &valueDelta) {
+  ESP.wdtFeed();
   globalRangeValues[instance] += valueDelta;
   globalRangeValues[instance] = valueDelta;
   return true;
@@ -363,17 +469,20 @@ bool onAdjustRangeValue(const String &deviceId, const String& instance, int &val
 
 // ModeController
 bool onSetMode(const String& deviceId, const String& instance, String &mode) {
+  ESP.wdtFeed();
   globalModes[instance] = mode;
   return true;
 }
 
 // RangeController
 void updateRangeValue(String instance, int value) {
+  ESP.wdtFeed();
   aquecedor.sendRangeValueEvent(instance, value);
   umidificador.sendRangeValueEvent(instance, value);
 }
 
 bool onPowerState(const String &deviceId, bool &state) {
+  ESP.wdtFeed();
   rele(deviceId, state);
   globalPowerState = state;
   releStatus[deviceId] = state; 
@@ -382,6 +491,7 @@ bool onPowerState(const String &deviceId, bool &state) {
 
 // ToggleController
 void updateToggleState(String instance, bool state) {
+  ESP.wdtFeed();
   aquecedor.sendToggleStateEvent(instance, state);
   umidificador.sendToggleStateEvent(instance, state);
   if (instance == "toggleAquecedor"){
@@ -415,6 +525,7 @@ void updatePowerState(bool state) {
 }
 
 void handleTemperaturesensor() {
+  ESP.wdtFeed();
   if (deviceIsOn == false) return;
   unsigned long actualMillis = millis();
   if (actualMillis - lastEvent < EVENT_WAIT_TIME) return;
@@ -432,6 +543,7 @@ void handleTemperaturesensor() {
     failSensor = false; 
   }
 
+  ESP.wdtFeed();
   temperature += tempOffset;
   humidity += umiOffset;
   if (temperature == lastTemperature & humidity == lastHumidity) return; // if no values changed do nothing...

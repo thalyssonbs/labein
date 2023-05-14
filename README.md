@@ -1,4 +1,5 @@
 # Monitoramento e Controle de Ambiente Sensível
+### (Código ainda em adaptação)
 
 ![IMG_3871](https://user-images.githubusercontent.com/106276067/218600422-d7edc120-a9aa-42d9-a8fc-c43eb1cadc21.png)
 

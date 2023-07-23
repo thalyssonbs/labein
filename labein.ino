@@ -14,7 +14,15 @@
 #include <EEPROM.h>
 #include <IRremote.hpp>
 #include "ThingSpeak.h"
+#include <ESP8266Ping.h>
+#include <Pinger.h>
+extern "C"
+{
+  #include <lwip/icmp.h> // needed for icmp packet definitions
+}
 
+// Set global to avoid object removing after setup() routine
+Pinger pinger;
 
 
 
@@ -41,14 +49,15 @@ float humidity;                               // actual humidity
 float lastTemperature;                        // last known temperature (for compare)
 float lastHumidity;                           // last known humidity (for compare)
 unsigned long lastEvent = (-EVENT_WAIT_TIME); // last time event has been sent
-//char  rst;
+
 bool  irSignal;
 unsigned int irDelay = 0;
-unsigned int runing;
 int irCom = 1;
-//char rst;
 bool wifiCom;
+char buff[32];
 
+String hostName = "www.sinric.pro";
+int late, notificar;
 
 
 bool tempAnFlag = false;
@@ -118,8 +127,56 @@ void setup() {
 
   ESP.wdtDisable();
   ESP.wdtFeed();
+ /*----------------------------*/
+
+
+switch (ESP.getResetInfoPtr()->reason) {
+    
+    case REASON_DEFAULT_RST: 
+      // do something at normal startup by power on
+      strcpy_P(buff, PSTR("Power on"));
+      break;
+      
+    case REASON_WDT_RST:
+      // do something at hardware watch dog reset
+      strcpy_P(buff, PSTR("Hardware Watchdog"));     
+      break;
+      
+    case REASON_EXCEPTION_RST:
+      // do something at exception reset
+      strcpy_P(buff, PSTR("Exception"));      
+      break;
+      
+    case REASON_SOFT_WDT_RST:
+      // do something at software watch dog reset
+      strcpy_P(buff, PSTR("Software Watchdog"));
+      break;
+      
+    case REASON_SOFT_RESTART: 
+      // do something at software restart ,system_restart 
+      strcpy_P(buff, PSTR("Software/System restart"));
+      break;
+      
+    case REASON_DEEP_SLEEP_AWAKE:
+      // do something at wake up from deep-sleep
+      strcpy_P(buff, PSTR("Deep-Sleep Wake"));
+      break;
+      
+    case REASON_EXT_SYS_RST:
+      // do something at external system reset (assertion of reset pin)
+      strcpy_P(buff, PSTR("External System"));
+      break;
+      
+    default:  
+      // do something when reset occured for unknown reason
+      strcpy_P(buff, PSTR("Unknown"));     
+      break;
+  }
+
+
+
+ /*----------------------------*/
   EEPROM.begin(32);
-  runing = millis();
   eeprAdr["Aquecedor"] = 0;
   eeprAdr["Umidificador"] = 1;
   eeprAdr["toggleAquecedor"] = 2;
@@ -137,7 +194,6 @@ void setup() {
   setupSinricPro();
   ESP.wdtFeed();
   ThingSpeak.begin(client);
-
   initEeprom();
   ESP.wdtFeed();
   //aquecedor.sendPowerStateEvent(Heater.swRelay(false));
@@ -147,29 +203,120 @@ void setup() {
   ESP.wdtFeed();
   relayPowerState[AQUECEDOR_ID] = false;
   relayPowerState[UMIDIFICADOR_ID] = false;
-  rstNotif();
+  //acordou = true;
+  StartTimer(5, 120000UL, wakeUP);
+  //rstTime = millis();
+  StartTimer(6, 259200000UL, espRestart);
+  //transmissaoTS = millis();
+  StartTimer(7, 30000UL, atualizaThingSpeak);
   
 }
 
+
+const byte TIMER_COUNT = 10;
+
+unsigned long TimerStartTimes[TIMER_COUNT];
+unsigned long TimerIntervals[TIMER_COUNT];
+void (*TimerCallbacks[TIMER_COUNT])(void);  // Callback functions
+
+void StartTimer(int index, unsigned long interval, void (*callback)(void)) {
+    if (TimerStartTimes[index] == 0UL) {  // Unused timer
+      TimerStartTimes[index] = millis();
+      TimerIntervals[index] = interval;
+      TimerCallbacks[index] = callback;
+  }
+}
+
+void CheckTimers() {
+  unsigned long currentTime = millis();
+  for (byte i = 0; i < TIMER_COUNT; i++) {
+    if ((TimerStartTimes[i] != 0UL) &&
+        (currentTime - TimerStartTimes[i] >= TimerIntervals[i])) {
+      TimerStartTimes[i] = 0;  // Unused Timer
+      (TimerCallbacks[i])();
+    }
+  }
+}
+
+
 void loop() {
   ESP.wdtFeed();
-  if (wifiCom) {
-    SinricPro.handle();
-    if(millis() - lastEvent < EVENT_WAIT_TIME+30000) atualizaThingSpeak();
-  }
-  else {
+  
+  if(!wifiCom){
     wifiCom = setupWiFi();
+  }
+  else{
+    SinricPro.handle();
   }
   
   handleTemperaturesensor();
   if(tempAnFlag) tempAnalyze();
   if(humiAnFlag) humiAnalyze();
   swHandle();
-  //if(rstFlag){
-  //  if (millis()<120000 & millis()>60000) rstNotif(rst_Reason());
-  //}
+
+  CheckTimers();
+  
   if(irSignal & (millis()-irDelay)>2000) humidifierON(irCom);
   
+}
+
+
+void espRestart(void) {
+  ESP.restart();
+  }
+
+
+void wakeUP(void){
+  if(wifiCom){
+    umidificador.sendPushNotification("Reinicialização: "+ String(buff));
+    ThingSpeak.setStatus("Reinicialização: "+ String(buff));
+  }
+  else {
+    StartTimer(5, 120000UL, wakeUP);
+  }
+}
+
+void ligou(int device){
+  switch (device) {
+    case 3:
+      StartTimer(1, 1800000UL, heaterTimeOut);
+      break;
+    case 0:
+      StartTimer(2, 1800000UL, umidifierTimeOut);
+      break;
+  }
+}
+
+void desligou(int device){
+  switch (device) {
+    case 3:
+      TimerStartTimes[1] = 0;
+      break;
+    case 0:
+      TimerStartTimes[2] = 0;
+      break;
+  }
+}
+
+
+void heaterTimeOut(void) {
+  devicePowerState[AQUECEDOR_ID] = false;
+  if(wifiCom) {
+    ThingSpeak.setStatus("Heater Timeout!");
+    aquecedor.sendPushNotification("Tempo Ligado Excedido!");
+  }
+  delay(1000);
+  swHandle();
+}
+
+void umidifierTimeOut(void) {
+  devicePowerState[UMIDIFICADOR_ID] = false;
+  if(wifiCom) {
+    ThingSpeak.setStatus("Humidifier Timeout!");
+    umidificador.sendPushNotification("Tempo Ligado Excedido!");
+  }
+  delay(1000);
+  swHandle();
 }
 
 
@@ -177,6 +324,7 @@ void swHandle(){
   if (devicePowerState[AQUECEDOR_ID]!=relayPowerState[AQUECEDOR_ID]){
     relayPowerState[AQUECEDOR_ID] = Heater.swRelay(devicePowerState[AQUECEDOR_ID]);
     wrEeprom(eeprAdr["Aquecedor"], devicePowerState[AQUECEDOR_ID]);
+    devicePowerState[AQUECEDOR_ID] ? ligou(Heater.relay) : desligou(Heater.relay);
     aquecedor.sendPowerStateEvent(relayPowerState[AQUECEDOR_ID]);
   }
 
@@ -185,6 +333,7 @@ void swHandle(){
     irSignal = relayPowerState[UMIDIFICADOR_ID];
     if(irSignal) irDelay = millis();
     wrEeprom(eeprAdr["Umidificador"], devicePowerState[UMIDIFICADOR_ID]);
+    devicePowerState[UMIDIFICADOR_ID] ? ligou(Humidifier.relay) : desligou(Humidifier.relay);
     umidificador.sendPowerStateEvent(relayPowerState[UMIDIFICADOR_ID]);
   }
 }
@@ -256,15 +405,30 @@ bool setupWiFi() {
     delay(1000);
   }
 
-  if(WiFi.status() == WL_CONNECTED) {
-    wifi = true;
-  }
-  else {
-    wifi = false;
-  }
+  wifi = latencia();
+  
   return wifi;
 
 }
+
+bool latencia() {
+  if(pinger.Ping(hostName)) {
+  wifiCom = true;
+  }
+  else {
+  wifiCom = false;
+  }
+
+  pinger.OnEnd([](const PingerResponse& response){
+  if (response.TotalReceivedResponses > 0) {
+    late = response.AvgResponseTime;
+  }
+  return true;
+  });
+  return wifiCom;
+}
+
+
 
 //-------------------DHT Handle Sinric Pro---------------------//
 void handleTemperaturesensor() {
@@ -272,12 +436,7 @@ void handleTemperaturesensor() {
 
   unsigned long actualMillis = millis();
   if (actualMillis - lastEvent < EVENT_WAIT_TIME) return; //only check every EVENT_WAIT_TIME milliseconds
-  //aquecedor.sendPushNotification("Temperatura selecionada: "+ String(globalRangeValues["rangeAquecedor"]) + "°C.");
-  //umidificador.sendPushNotification("Umidade selecionada: "+ String(globalRangeValues["rangeUmidificador"]) + "%.");
-  //aquecedor.sendPushNotification("Valor na memória EEPROM: "+String(rdEeprom(4)));
-//  if (millis()-runing >= 86400000) {
-//    ESP.restart();
-//  }
+
 
   sensors_event_t event;
   dht.temperature().getEvent(&event);
@@ -303,8 +462,12 @@ void handleTemperaturesensor() {
     
   }
 
-  if(temperature < 25 | temperature > 29 | humidity < 70 | humidity > 80) {
+  if(temperature < (globalRangeValues["rangeAquecedor"]-2) | temperature > (globalRangeValues["rangeAquecedor"]+2) | humidity < (globalRangeValues["rangeUmidificador"]-5) | humidity > (globalRangeValues["rangeUmidificador"]+3)) {
+    notificar++;
     alerta();
+  }
+  else{
+    notificar = 0;
   }
 
   lastTemperature = temperature;  // save actual temperature for next compare
@@ -438,7 +601,14 @@ void humidifierON(int command) {
       break;
     }
     case 3: {
+      irDelay = millis();
       sendIrSignal(3);
+      irCom = 4;
+      //irSignal = false;
+      break;
+    }
+    case 4: {
+      sendIrSignal(4);
       irCom = 1;
       irSignal = false;
       break;
@@ -457,7 +627,7 @@ void sendIrSignal(int command) {
   //uint16_t irBrisa[67] = {8930,4470, 580,1670, 530,570, 580,570, 530,570, 580,570, 530,570, 580,570, 530,570, 580,570, 530,1720, 530,1670, 580,1670, 580,1670, 580,1670, 580,1670, 530,1670, 580,1670, 580,570, 580,1570, 630,570, 580,570, 530,570, 580,570, 530,570, 580,570, 530,1720, 530,570, 580,1670, 580,1670, 530,1720, 530,1670, 580,1670, 580};  // Protocol=NEC Address=0x1 Command=0x5 Raw-Data=0xFA05FE01 32 bits LSB first
   uint16_t irClima[67] = {8930,4470, 580,1670, 530,570, 580,570, 530,570, 530,620, 530,570, 580,570, 530,570, 580,570, 530,1720, 530,1670, 580,1670, 530,1720, 530,1720, 580,1670, 530,1670, 580,570, 580,1670, 580,520, 580,1670, 530,620, 530,570, 580,570, 530,570, 580,1670, 580,570, 530,1670, 580,570, 580,1670, 530,1720, 530,1670, 580,1670, 580};  // Protocol=NEC Address=0x1 Command=0xA Raw-Data=0xF50AFE01 32 bits LSB first
   //uint16_t irVeloc[67] = {8980,4470, 580,1620, 630,520, 580,520, 630,520, 580,570, 580,520, 580,570, 580,520, 580,570, 580,1620, 630,1620, 630,1620, 580,1670, 580,1670, 580,1620, 630,1620, 630,520, 580,1670, 580,520, 580,1670, 580,1670, 580,520, 630,520, 580,520, 630,1620, 580,570, 580,1670, 580,520, 580,570, 580,1620, 630,1620, 580,1670, 580};  // Protocol=NEC Address=0x1 Command=0x1A Raw-Data=0xE51AFE01 32 bits LSB first
-  //uint16_t irTimer[67] = {8930,4470, 580,1670, 580,520, 580,570, 580,520, 580,570, 530,570, 580,570, 530,570, 580,570, 530,1670, 580,1670, 630,1620, 580,1670, 580,1670, 580,1670, 580,1620, 630,1620, 580,570, 580,1670, 530,1670, 580,570, 580,570, 530,570, 580,570, 580,520, 580,1670, 580,520, 580,570, 580,1670, 580,1670, 580,1620, 580,1670, 580};  // Protocol=NEC Address=0x1 Command=0xD Raw-Data=0xF20DFE01 32 bits LSB first
+  uint16_t irTimer[67] = {8930,4470, 580,1670, 580,520, 580,570, 580,520, 580,570, 530,570, 580,570, 530,570, 580,570, 530,1670, 580,1670, 630,1620, 580,1670, 580,1670, 580,1670, 580,1620, 630,1620, 580,570, 580,1670, 530,1670, 580,570, 580,570, 530,570, 580,570, 580,520, 580,1670, 580,520, 580,570, 580,1670, 580,1670, 580,1620, 580,1670, 580};  // Protocol=NEC Address=0x1 Command=0xD Raw-Data=0xF20DFE01 32 bits LSB first
   //uint16_t irModo[67] = {8930,4470, 580,1620, 630,520, 580,570, 580,520, 580,570, 580,520, 580,570, 580,520, 580,570, 580,1670, 580,1620, 630,1620, 580,1670, 580,1670, 580,1670, 530,1670, 580,570, 580,520, 580,570, 580,1670, 580,520, 580,570, 580,520, 580,570, 580,1670, 530,1670, 580,1670, 580,570, 580,1670, 530,1670, 580,1620, 580,1720, 530};  // Protocol=NEC Address=0x1 Command=0x8 Raw-Data=0xF708FE01 32 bits LSB first
 
 
@@ -476,70 +646,38 @@ void sendIrSignal(int command) {
       IrSender.sendRaw(irClima, sizeof(irClima) / sizeof(irClima[0]), NEC_KHZ);
       break;
     }
+    case 4: {
+      IrSender.sendRaw(irTimer, sizeof(irTimer) / sizeof(irTimer[0]), NEC_KHZ);
+      break;
+    }
   }
   return;
 }
 
-void rstNotif() {
-  char buff[32];
-  switch (ESP.getResetInfoPtr()->reason) {
-    
-    case REASON_DEFAULT_RST: 
-      // Inicialização normal
-      strcpy_P(buff, PSTR("Power on"));
-      break;
-      
-    case REASON_WDT_RST:
-      // Estouro do Hardware Watchdog
-      strcpy_P(buff, PSTR("Hardware Watchdog"));
-      break;
-      
-    case REASON_EXCEPTION_RST:
-      // Exception Reset
-      strcpy_P(buff, PSTR("Exception"));      
-      break;
-      
-    case REASON_SOFT_WDT_RST:
-      // Estouro do Software Watchdog
-      strcpy_P(buff, PSTR("Software Watchdog"));
-      break;
-      
-    case REASON_SOFT_RESTART: 
-      // Software/System Restart
-      strcpy_P(buff, PSTR("Software/System restart"));
-      break;
-      
-    case REASON_DEEP_SLEEP_AWAKE:
-      // Despertar do modo suspensão
-      strcpy_P(buff, PSTR("Deep-Sleep Wake"));
-      break;
-      
-    case REASON_EXT_SYS_RST:
-      // Reinicialização externa (Reset Pin)
-      strcpy_P(buff, PSTR("External System"));
-      break;
-      
-    default:  
-      // Reinicialização desconhecida
-      strcpy_P(buff, PSTR("Unknown"));     
-      break;
-  }
-  aquecedor.sendPushNotification("Reinicialização: "+ String(buff));
-  //rstFlag = false;
-}
+//void rstNotif() {
+//  umidificador.sendPushNotification("Reinicialização: "+ String(buff));
+//  rstFlag = false;
+//  return;
+//}
 
 void alerta(){
+  if(notificar < 30) return;
   umidificador.sendPushNotification("ALERTA! Umidade: "+ String(humidity));
   aquecedor.sendPushNotification("ALERTA! Temperatura: "+ String(temperature));
+  notificar = 0;
 }
 
-void atualizaThingSpeak(){
-
+void atualizaThingSpeak(void){
+  wifiCom = latencia();
   //ESP.wdtFeed();
   ThingSpeak.setField(1, temperature);
   ThingSpeak.setField(2, humidity);
   ThingSpeak.setField(3, relayPowerState[AQUECEDOR_ID]);
   ThingSpeak.setField(4, relayPowerState[UMIDIFICADOR_ID]);
+  ThingSpeak.setField(5, late);
 
   int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
+
+  StartTimer(7, 60000UL, atualizaThingSpeak);
+  //transmissaoTS = millis();
 }
